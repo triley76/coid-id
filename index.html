@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>AI Coin Identifier</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { -webkit-tap-highlight-color: transparent; }
+        body { overscroll-behavior: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
+
+        // Lucide React icons as inline SVG components
+        const Camera = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+                <circle cx="12" cy="13" r="3"/>
+            </svg>
+        );
+
+        const Database = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+            </svg>
+        );
+
+        const Settings = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 1v6m0 6v6m5.2-13.8l-4.2 4.2m0 3.6 4.2 4.2M1 12h6m6 0h6m-13.8 5.2l4.2-4.2m3.6 0 4.2 4.2"/>
+            </svg>
+        );
+
+        const Download = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+        );
+
+        const Search = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/>
+                <path d="m21 21-4.35-4.35"/>
+            </svg>
+        );
+
+        const AlertCircle = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+        );
+
+        const CheckCircle = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+        );
+
+        const Key = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="7.5" cy="15.5" r="5.5"/>
+                <path d="m21 2-9.6 9.6"/>
+                <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+            </svg>
+        );
+
+        const CoinCatalogApp = () => {
+            const [stream, setStream] = useState(null);
+            const [capturedImage, setCapturedImage] = useState(null);
+            const [analyzing, setAnalyzing] = useState(false);
+            const [coinData, setCoinData] = useState(null);
+            const [catalog, setCatalog] = useState(() => {
+                const saved = localStorage.getItem('coinCatalog');
+                return saved ? JSON.parse(saved) : [];
+            });
+            const [showCamera, setShowCamera] = useState(false);
+            const [view, setView] = useState('camera');
+            const [showSettings, setShowSettings] = useState(false);
+            const [apiKey, setApiKey] = useState(() => localStorage.getItem('coinApiKey') || '');
+            const [apiProvider, setApiProvider] = useState(() => localStorage.getItem('coinApiProvider') || 'simulated');
+            const [error, setError] = useState('');
+            
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+
+            useEffect(() => {
+                localStorage.setItem('coinCatalog', JSON.stringify(catalog));
+            }, [catalog]);
+
+            useEffect(() => {
+                localStorage.setItem('coinApiKey', apiKey);
+            }, [apiKey]);
+
+            useEffect(() => {
+                localStorage.setItem('coinApiProvider', apiProvider);
+            }, [apiProvider]);
+
+            const coinDatabase = {
+                penny: {
+                    name: "Lincoln Cent",
+                    denominations: ["1¢"],
+                    years: [1909, 2024],
+                    commonErrors: [
+                        { name: "Double Die Obverse", value: "$50-$300", rarity: "Rare" },
+                        { name: "Off-Center Strike", value: "$20-$100", rarity: "Uncommon" }
+                    ]
+                },
+                nickel: {
+                    name: "Jefferson Nickel",
+                    denominations: ["5¢"],
+                    years: [1938, 2024],
+                    commonErrors: [
+                        { name: "Full Steps", value: "$30-$200", rarity: "Uncommon" }
+                    ]
+                },
+                dime: {
+                    name: "Roosevelt Dime",
+                    denominations: ["10¢"],
+                    years: [1946, 2024],
+                    commonErrors: [
+                        { name: "Missing Clad Layer", value: "$100-$400", rarity: "Rare" }
+                    ]
+                },
+                quarter: {
+                    name: "Washington Quarter",
+                    denominations: ["25¢"],
+                    years: [1932, 2024],
+                    commonErrors: [
+                        { name: "Double Die Reverse", value: "$75-$300", rarity: "Rare" }
+                    ]
+                }
+            };
+
+            useEffect(() => {
+                return () => {
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                    }
+                };
+            }, [stream]);
+
+            const startCamera = async () => {
+                try {
+                    const mediaStream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'environment', width: 1920, height: 1080 }
+                    });
+                    setStream(mediaStream);
+                    setShowCamera(true);
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = mediaStream;
+                    }
+                } catch (err) {
+                    setError('Camera access denied. Please enable camera permissions.');
+                }
+            };
+
+            const stopCamera = () => {
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    setStream(null);
+                    setShowCamera(false);
+                }
+            };
+
+            const capturePhoto = () => {
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+                
+                if (video && canvas) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0);
+                    const imageData = canvas.toDataURL('image/jpeg', 0.9);
+                    setCapturedImage(imageData);
+                    analyzeCoin(imageData);
+                    stopCamera();
+                }
+            };
+
+            const analyzeWithGPT4 = async (base64Image) => {
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-4o',
+                        messages: [{
+                            role: 'user',
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: `Analyze this coin and return JSON: {"coinType":"name","year":number,"denomination":"value","country":"country","mintMark":"mark or None","condition":"grade","material":"metal","hasError":boolean,"errorDescription":"error or None","estimatedValue":"$X-Y","confidence":"high/medium/low"}. Check for double dies, off-center strikes, clipped planchets, die cracks.`
+                                },
+                                {
+                                    type: 'image_url',
+                                    image_url: { url: base64Image }
+                                }
+                            ]
+                        }],
+                        max_tokens: 500
+                    })
+                });
+
+                if (!response.ok) throw new Error(`API Error: ${response.status}`);
+                const data = await response.json();
+                const content = data.choices[0].message.content;
+                const jsonMatch = content.match(/\{[\s\S]*\}/);
+                if (jsonMatch) return JSON.parse(jsonMatch[0]);
+                throw new Error('Could not parse AI response');
+            };
+
+            const analyzeSimulated = async () => {
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        const coinTypes = Object.keys(coinDatabase);
+                        const randomCoin = coinTypes[Math.floor(Math.random() * coinTypes.length)];
+                        const coin = coinDatabase[randomCoin];
+                        const year = Math.floor(Math.random() * (coin.years[1] - coin.years[0])) + coin.years[0];
+                        const condition = ['Poor', 'Fair', 'Good', 'Very Good', 'Fine', 'Very Fine', 'Extremely Fine', 'Uncirculated'][Math.floor(Math.random() * 8)];
+                        const hasError = Math.random() > 0.7;
+                        const detectedError = hasError ? coin.commonErrors[Math.floor(Math.random() * coin.commonErrors.length)] : null;
+                        
+                        resolve({
+                            coinType: coin.name,
+                            year: year,
+                            denomination: coin.denominations[0],
+                            country: 'United States',
+                            mintMark: ['P', 'D', 'S', 'None'][Math.floor(Math.random() * 4)],
+                            condition: condition,
+                            material: 'Copper-Nickel',
+                            hasError: hasError,
+                            errorDescription: detectedError ? detectedError.name : 'None',
+                            errorValue: detectedError ? detectedError.value : null,
+                            errorRarity: detectedError ? detectedError.rarity : null,
+                            estimatedValue: '$0.25-$5.00',
+                            confidence: 'simulated'
+                        });
+                    }, 2000);
+                });
+            };
+
+            const analyzeCoin = async (imageData) => {
+                setAnalyzing(true);
+                setError('');
+                
+                try {
+                    let result;
+                    
+                    if (apiProvider === 'gpt4' && apiKey) {
+                        const aiResult = await analyzeWithGPT4(imageData);
+                        result = {
+                            id: Date.now(),
+                            image: imageData,
+                            ...aiResult,
+                            catalogDate: new Date().toISOString(),
+                            source: 'GPT-4o Vision'
+                        };
+                    } else {
+                        const simResult = await analyzeSimulated();
+                        result = {
+                            id: Date.now(),
+                            image: imageData,
+                            ...simResult,
+                            catalogDate: new Date().toISOString(),
+                            source: 'Simulated (Demo Mode)'
+                        };
+                    }
+                    
+                    setCoinData(result);
+                } catch (err) {
+                    setError(`Analysis failed: ${err.message}. Using simulated results.`);
+                    const simResult = await analyzeSimulated();
+                    setCoinData({
+                        id: Date.now(),
+                        image: imageData,
+                        ...simResult,
+                        catalogDate: new Date().toISOString(),
+                        source: 'Simulated (Fallback)'
+                    });
+                } finally {
+                    setAnalyzing(false);
+                }
+            };
+
+            const addToCatalog = () => {
+                if (coinData) {
+                    setCatalog([...catalog, coinData]);
+                    setCoinData(null);
+                    setCapturedImage(null);
+                }
+            };
+
+            const deleteCoin = (id) => {
+                setCatalog(catalog.filter(coin => coin.id !== id));
+            };
+
+            const exportToCSV = () => {
+                const headers = ['Date', 'Coin Type', 'Year', 'Denomination', 'Country', 'Condition', 'Mint Mark', 'Error', 'Value'];
+                const rows = catalog.map(coin => [
+                    new Date(coin.catalogDate).toLocaleDateString(),
+                    coin.coinType,
+                    coin.year || 'Unknown',
+                    coin.denomination,
+                    coin.country || 'US',
+                    coin.condition,
+                    coin.mintMark,
+                    coin.errorDescription || 'None',
+                    coin.estimatedValue
+                ]);
+                
+                const csvContent = [
+                    headers.join(','),
+                    ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+                ].join('\n');
+                
+                const blob = new Blob([csvContent], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `coin-catalog-${Date.now()}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-amber-50 to-yellow-100 p-2">
+                    <div className="max-w-4xl mx-auto">
+                        <div className="bg-white rounded-lg shadow-xl overflow-hidden">
+                            <div className="bg-gradient-to-r from-amber-600 to-yellow-600 p-4 text-white">
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h1 className="text-2xl font-bold flex items-center gap-2">
+                                            <Database />
+                                            AI Coin Identifier
+                                        </h1>
+                                        <p className="text-amber-100 text-sm mt-1">Real AI-powered recognition</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowSettings(!showSettings)}
+                                        className="bg-amber-700 hover:bg-amber-800 p-2 rounded-lg transition"
+                                    >
+                                        <Settings />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {showSettings && (
+                                <div className="bg-amber-50 p-4 border-b-2 border-amber-200">
+                                    <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+                                        <Key />
+                                        AI Configuration
+                                    </h3>
+                                    
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                AI Provider
+                                            </label>
+                                            <select
+                                                value={apiProvider}
+                                                onChange={(e) => setApiProvider(e.target.value)}
+                                                className="w-full p-3 border-2 border-amber-300 rounded-lg"
+                                            >
+                                                <option value="simulated">Simulated (Demo - No Key Required)</option>
+                                                <option value="gpt4">GPT-4o Vision (OpenAI)</option>
+                                            </select>
+                                        </div>
+
+                                        {apiProvider === 'gpt4' && (
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                    OpenAI API Key
+                                                </label>
+                                                <input
+                                                    type="password"
+                                                    value={apiKey}
+                                                    onChange={(e) => setApiKey(e.target.value)}
+                                                    placeholder="sk-..."
+                                                    className="w-full p-3 border-2 border-amber-300 rounded-lg"
+                                                />
+                                                <p className="text-xs text-gray-600 mt-2">
+                                                    Get your key at: platform.openai.com/api-keys
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {error && (
+                                <div className="bg-yellow-50 border-l-4 border-yellow-500 p-3">
+                                    <p className="text-yellow-800 text-sm">{error}</p>
+                                </div>
+                            )}
+
+                            <div className="flex border-b">
+                                <button
+                                    onClick={() => setView('camera')}
+                                    className={`flex-1 py-3 font-semibold text-sm ${view === 'camera' ? 'bg-amber-50 text-amber-700 border-b-2 border-amber-600' : 'text-gray-600'}`}
+                                >
+                                    <Camera className="inline w-5 h-5 mr-1" />
+                                    Capture
+                                </button>
+                                <button
+                                    onClick={() => setView('catalog')}
+                                    className={`flex-1 py-3 font-semibold text-sm ${view === 'catalog' ? 'bg-amber-50 text-amber-700 border-b-2 border-amber-600' : 'text-gray-600'}`}
+                                >
+                                    <Database className="inline w-5 h-5 mr-1" />
+                                    Catalog ({catalog.length})
+                                </button>
+                            </div>
+
+                            {view === 'camera' && (
+                                <div className="p-4">
+                                    {!showCamera && !capturedImage && (
+                                        <div className="text-center py-8">
+                                            <Camera className="w-20 h-20 mx-auto text-amber-400 mb-3" />
+                                            <h2 className="text-xl font-semibold text-gray-800 mb-2">Ready to Identify?</h2>
+                                            <p className="text-gray-600 text-sm mb-4">
+                                                {apiProvider === 'simulated' ? 'Using demo mode' : apiKey ? 'Using GPT-4o Vision' : 'API key required'}
+                                            </p>
+                                            <button
+                                                onClick={startCamera}
+                                                className="bg-amber-600 text-white px-6 py-3 rounded-lg font-semibold"
+                                            >
+                                                Start Camera
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {showCamera && (
+                                        <div className="space-y-3">
+                                            <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg" />
+                                            <div className="flex gap-2">
+                                                <button onClick={capturePhoto} className="flex-1 bg-amber-600 text-white py-3 rounded-lg font-semibold">
+                                                    Capture
+                                                </button>
+                                                <button onClick={stopCamera} className="px-4 bg-gray-300 text-gray-800 py-3 rounded-lg font-semibold">
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {capturedImage && (
+                                        <div className="space-y-3">
+                                            <img src={capturedImage} alt="Captured coin" className="w-full rounded-lg shadow-lg" />
+                                            
+                                            {analyzing && (
+                                                <div className="text-center py-6">
+                                                    <Search className="w-12 h-12 mx-auto text-amber-600 mb-3 animate-pulse" />
+                                                    <p className="text-lg font-semibold text-gray-700">Analyzing...</p>
+                                                </div>
+                                            )}
+
+                                            {coinData && (
+                                                <div className="bg-amber-50 rounded-lg p-4 space-y-3">
+                                                    <div className="flex justify-between items-center border-b-2 border-amber-300 pb-2">
+                                                        <h3 className="text-xl font-bold text-gray-800">Results</h3>
+                                                        <span className="text-xs bg-amber-200 text-amber-800 px-2 py-1 rounded-full">
+                                                            {coinData.source}
+                                                        </span>
+                                                    </div>
+                                                    
+                                                    <div className="grid grid-cols-2 gap-3 text-sm">
+                                                        <div><p className="text-gray-600">Type</p><p className="font-semibold">{coinData.coinType}</p></div>
+                                                        <div><p className="text-gray-600">Year</p><p className="font-semibold">{coinData.year || '?'}</p></div>
+                                                        <div><p className="text-gray-600">Value</p><p className="font-semibold">{coinData.denomination}</p></div>
+                                                        <div><p className="text-gray-600">Mint</p><p className="font-semibold">{coinData.mintMark}</p></div>
+                                                        <div><p className="text-gray-600">Condition</p><p className="font-semibold">{coinData.condition}</p></div>
+                                                        <div><p className="text-gray-600">Est. Value</p><p className="font-semibold text-green-600">{coinData.estimatedValue}</p></div>
+                                                    </div>
+
+                                                    {coinData.hasError && coinData.errorDescription !== 'None' && (
+                                                        <div className="bg-red-50 border-2 border-red-300 rounded-lg p-3">
+                                                            <div className="flex items-start gap-2">
+                                                                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                                                                <div>
+                                                                    <h4 className="font-bold text-red-800">Minting Error!</h4>
+                                                                    <p className="text-red-700 text-sm">{coinData.errorDescription}</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="flex gap-2 pt-2">
+                                                        <button onClick={addToCatalog} className="flex-1 bg-amber-600 text-white py-2 rounded-lg font-semibold">
+                                                            Add to Catalog
+                                                        </button>
+                                                        <button onClick={() => { setCapturedImage(null); setCoinData(null); }} className="px-4 bg-gray-300 text-gray-800 py-2 rounded-lg font-semibold">
+                                                            Retake
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {view === 'catalog' && (
+                                <div className="p-4">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h2 className="text-xl font-bold text-gray-800">My Collection</h2>
+                                        {catalog.length > 0 && (
+                                            <button onClick={exportToCSV} className="bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-1">
+                                                <Download className="w-4 h-4" />
+                                                Export
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    {catalog.length === 0 ? (
+                                        <div className="text-center py-12">
+                                            <Database className="w-20 h-20 mx-auto text-gray-300 mb-3" />
+                                            <p className="text-gray-500">No coins yet</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {catalog.map((coin) => (
+                                                <div key={coin.id} className="bg-amber-50 rounded-lg p-3 flex gap-3 shadow">
+                                                    <img src={coin.image} alt={coin.coinType} className="w-20 h-20 object-cover rounded" />
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex justify-between">
+                                                            <div className="flex-1 min-w-0">
+                                                                <h3 className="font-bold text-gray-800 truncate">{coin.coinType}</h3>
+                                                                <p className="text-sm text-gray-600">{coin.year || '?'} • {coin.denomination}</p>
+                                                                <p className="text-xs text-gray-500">{coin.condition}</p>
+                                                            </div>
+                                                            <div className="text-right">
+                                                                <p className="text-green-600 font-bold text-sm">{coin.estimatedValue}</p>
+                                                                <button onClick={() => deleteCoin(coin.id)} className="text-red-600 text-xs mt-1">Delete</button>
+                                                            </div>
+                                                        </div>
+                                                        {coin.hasError && coin.errorDescription !== 'None' && (
+                                                            <p className="text-red-700 text-xs font-semibold mt-1">⚠️ {coin.errorDescription}</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        <canvas ref={canvasRef} style={{display: 'none'}} />
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<CoinCatalogApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
