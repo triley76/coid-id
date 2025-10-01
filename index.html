@@ -1,4 +1,33 @@
-<!DOCTYPE html>
+                                            {/* Zoom controls */}
+                                            {capabilities && capabilities.zoom && maxZoom > 1 && (
+                                                <div className="bg-gray-100 rounded-lg p-3">
+                                                    <div className="flex items-center gap-3 mb-2">
+                                                        <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">
+                                                            🔍 Zoom: {zoom.toFixed(1)}x
+                                                        </span>
+                                                        <input
+                                                            type="range"
+                                                            min="1"
+                                                            max={maxZoom}
+                                                            step="0.1"
+                                                            value={zoom}
+                                                            onChange={handleZoomChange}
+                                                            className="flex-1"
+                                                        />
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <button 
+                                                            onClick={() => applyZoom(1)} 
+                                                            className="flex-1 bg-gray-200 text-gray-700 py-1 rounded text-xs font-semibold"
+                                                        >
+                                                            1x
+                                                        </button>
+                                                        {maxZoom >= 2 && (
+                                                            <button 
+                                                                onClick={() => applyZoom(2)} 
+                                                                className="flex-1 bg-amber-200 text-amber-800 py-1 rounded text-xs font-semibold"
+                                                            >
+           <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -13,6 +42,10 @@
     <style>
         * { -webkit-tap-highlight-color: transparent; }
         body { overscroll-behavior: none; }
+        @keyframes focusPulse {
+            0% { transform: scale(1.5); opacity: 1; }
+            100% { transform: scale(1); opacity: 0; }
+        }
     </style>
 </head>
 <body>
@@ -97,9 +130,14 @@
             const [apiKey, setApiKey] = useState(() => localStorage.getItem('coinApiKey') || '');
             const [apiProvider, setApiProvider] = useState(() => localStorage.getItem('coinApiProvider') || 'simulated');
             const [error, setError] = useState('');
+            const [zoom, setZoom] = useState(1);
+            const [maxZoom, setMaxZoom] = useState(1);
+            const [flashEnabled, setFlashEnabled] = useState(false);
+            const [capabilities, setCapabilities] = useState(null);
             
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
+            const lastTouchDistance = useRef(0);
 
             useEffect(() => {
                 localStorage.setItem('coinCatalog', JSON.stringify(catalog));
@@ -160,12 +198,31 @@
             const startCamera = async () => {
                 try {
                     const mediaStream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'environment', width: 1920, height: 1080 }
+                        video: { 
+                            facingMode: 'environment',
+                            width: { ideal: 4096 },
+                            height: { ideal: 2160 },
+                            aspectRatio: { ideal: 16/9 }
+                        }
                     });
+                    
                     setStream(mediaStream);
                     setShowCamera(true);
+                    
                     if (videoRef.current) {
                         videoRef.current.srcObject = mediaStream;
+                        
+                        // Get camera capabilities for zoom
+                        const videoTrack = mediaStream.getVideoTracks()[0];
+                        const trackCapabilities = videoTrack.getCapabilities();
+                        const trackSettings = videoTrack.getSettings();
+                        
+                        setCapabilities(trackCapabilities);
+                        
+                        if (trackCapabilities.zoom) {
+                            setMaxZoom(trackCapabilities.zoom.max);
+                            setZoom(trackSettings.zoom || 1);
+                        }
                     }
                 } catch (err) {
                     setError('Camera access denied. Please enable camera permissions.');
@@ -177,7 +234,108 @@
                     stream.getTracks().forEach(track => track.stop());
                     setStream(null);
                     setShowCamera(false);
+                    setZoom(1);
                 }
+            };
+
+            const applyZoom = async (zoomValue) => {
+                if (stream && capabilities && capabilities.zoom) {
+                    const videoTrack = stream.getVideoTracks()[0];
+                    try {
+                        await videoTrack.applyConstraints({
+                            advanced: [{ zoom: zoomValue }]
+                        });
+                        setZoom(zoomValue);
+                    } catch (err) {
+                        console.error('Zoom error:', err);
+                    }
+                }
+            };
+
+            const handleZoomChange = (e) => {
+                const newZoom = parseFloat(e.target.value);
+                applyZoom(newZoom);
+            };
+
+            const toggleFlash = async () => {
+                if (stream) {
+                    const videoTrack = stream.getVideoTracks()[0];
+                    try {
+                        await videoTrack.applyConstraints({
+                            advanced: [{ torch: !flashEnabled }]
+                        });
+                        setFlashEnabled(!flashEnabled);
+                    } catch (err) {
+                        console.error('Flash not supported:', err);
+                    }
+                }
+            };
+
+            const handleTapToFocus = async (e) => {
+                if (!videoRef.current || !stream) return;
+                
+                const video = videoRef.current;
+                const rect = video.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / rect.width;
+                const y = (e.clientY - rect.top) / rect.height;
+                
+                const videoTrack = stream.getVideoTracks()[0];
+                const capabilities = videoTrack.getCapabilities();
+                
+                if (capabilities.focusMode && capabilities.focusMode.includes('manual')) {
+                    try {
+                        await videoTrack.applyConstraints({
+                            advanced: [{
+                                focusMode: 'manual',
+                                pointsOfInterest: [{ x, y }]
+                            }]
+                        });
+                        
+                        // Visual feedback
+                        const indicator = document.createElement('div');
+                        indicator.style.cssText = `
+                            position: absolute;
+                            left: ${e.clientX - rect.left - 30}px;
+                            top: ${e.clientY - rect.top - 30}px;
+                            width: 60px;
+                            height: 60px;
+                            border: 2px solid yellow;
+                            border-radius: 50%;
+                            pointer-events: none;
+                            animation: focusPulse 0.5s ease-out;
+                        `;
+                        video.parentElement.appendChild(indicator);
+                        setTimeout(() => indicator.remove(), 500);
+                    } catch (err) {
+                        console.log('Manual focus not supported');
+                    }
+                }
+            };
+
+            const handlePinchZoom = (e) => {
+                if (e.touches.length === 2 && capabilities && capabilities.zoom) {
+                    e.preventDefault();
+                    
+                    const touch1 = e.touches[0];
+                    const touch2 = e.touches[1];
+                    const distance = Math.hypot(
+                        touch2.clientX - touch1.clientX,
+                        touch2.clientY - touch1.clientY
+                    );
+                    
+                    if (lastTouchDistance.current > 0) {
+                        const delta = distance - lastTouchDistance.current;
+                        const zoomChange = delta * 0.01;
+                        const newZoom = Math.max(1, Math.min(maxZoom, zoom + zoomChange));
+                        applyZoom(newZoom);
+                    }
+                    
+                    lastTouchDistance.current = distance;
+                }
+            };
+
+            const handleTouchEnd = () => {
+                lastTouchDistance.current = 0;
             };
 
             const capturePhoto = () => {
@@ -512,13 +670,73 @@
 
                                     {showCamera && (
                                         <div className="space-y-3">
-                                            <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg" />
+                                            <div className="relative">
+                                                <video 
+                                                    ref={videoRef} 
+                                                    autoPlay 
+                                                    playsInline 
+                                                    className="w-full rounded-lg"
+                                                    onClick={handleTapToFocus}
+                                                    onTouchMove={handlePinchZoom}
+                                                    onTouchEnd={handleTouchEnd}
+                                                    style={{ touchAction: 'none' }}
+                                                />
+                                                
+                                                {/* Flash indicator */}
+                                                {flashEnabled && (
+                                                    <div className="absolute top-2 right-2 bg-yellow-400 text-yellow-900 px-2 py-1 rounded text-xs font-bold">
+                                                        🔦 Flash ON
+                                                    </div>
+                                                )}
+                                                
+                                                {/* Tap to focus hint */}
+                                                <div className="absolute bottom-2 left-2 right-2 bg-black bg-opacity-50 text-white text-xs p-2 rounded text-center">
+                                                    Tap to focus • Pinch to zoom
+                                                </div>
+                                            </div>
+                                            
+                                            {/* Zoom controls */}
+                                            {capabilities && capabilities.zoom && maxZoom > 1 && (
+                                                <div className="bg-gray-100 rounded-lg p-3">
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-sm font-semibold text-gray-700 whitespace-nowrap">
+                                                            🔍 Zoom: {zoom.toFixed(1)}x
+                                                        </span>
+                                                        <input
+                                                            type="range"
+                                                            min="1"
+                                                            max={maxZoom}
+                                                            step="0.1"
+                                                            value={zoom}
+                                                            onChange={handleZoomChange}
+                                                            className="flex-1"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                            
                                             <div className="flex gap-2">
-                                                <button onClick={capturePhoto} className="flex-1 bg-amber-600 text-white py-3 rounded-lg font-semibold">
-                                                    Capture
+                                                <button 
+                                                    onClick={capturePhoto} 
+                                                    className="flex-1 bg-amber-600 text-white py-3 rounded-lg font-semibold"
+                                                >
+                                                    📸 Capture
                                                 </button>
-                                                <button onClick={stopCamera} className="px-4 bg-gray-300 text-gray-800 py-3 rounded-lg font-semibold">
-                                                    Cancel
+                                                
+                                                {capabilities && capabilities.torch && (
+                                                    <button 
+                                                        onClick={toggleFlash}
+                                                        className={`px-4 ${flashEnabled ? 'bg-yellow-500' : 'bg-gray-500'} text-white py-3 rounded-lg font-semibold`}
+                                                    >
+                                                        {flashEnabled ? '🔦' : '💡'}
+                                                    </button>
+                                                )}
+                                                
+                                                <button 
+                                                    onClick={stopCamera} 
+                                                    className="px-4 bg-gray-300 text-gray-800 py-3 rounded-lg font-semibold"
+                                                >
+                                                    ✕
                                                 </button>
                                             </div>
                                         </div>
